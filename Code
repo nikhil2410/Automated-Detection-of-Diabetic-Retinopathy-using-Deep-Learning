@@ -1,1 +1,168 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import cv2
+import os, glob
+import tensorflow as tf
+from tqdm import tqdm
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
+from keras.utils.np_utils import to_categorical
+from keras.models import Model, Sequential, load_model
+from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPool2D, BatchNormalization, GlobalAveragePooling2D,Activation,Input
+from tensorflow.keras.optimizers import Adam
+from keras.preprocessing.image import ImageDataGenerator
 
+data_dir=r"Data/train/"
+Retanial=[]
+for file in os.listdir(data_dir):
+    Retanial+=[file]
+print(Retanial)
+print(len(Retanial))
+
+train_dir="Data/train"
+val_dir="Data/val/"
+
+img_height,img_width=256,256
+batch_size=20
+
+train_datagen = ImageDataGenerator(rescale=1./255)
+train_generator = train_datagen.flow_from_directory(train_dir,
+                                                target_size=(img_height,img_width),
+                                                batch_size=batch_size,
+                                                class_mode='categorical')
+
+val_generator = train_datagen.flow_from_directory(val_dir,
+                                                target_size=(img_height,img_width),
+                                                batch_size=batch_size,
+                                                class_mode='categorical')
+
+
+precision=tf.keras.metrics.Precision()
+recall=tf.keras.metrics.Recall()
+
+
+from sklearn.metrics import confusion_matrix
+def plot_confusion_matrix(y_true, y_pred, classes,
+                          normalize=False,
+                          title=None,
+                          cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if not title:
+        if normalize:
+            title = 'Normalized confusion matrix'
+        else:
+            title = 'Confusion matrix, without normalization'
+
+    # Compute confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    # Only use the labels that appear in the data
+    classes = classes
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    print(cm)
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
+    ax.figure.colorbar(im, ax=ax)
+    # We want to show all ticks...
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           # ... and label them with the respective list entries
+           xticklabels=classes, yticklabels=classes,
+           title=title,
+           ylabel='True label',
+           xlabel='Predicted label')
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+             rotation_mode="anchor")
+
+    # Loop over data dimensions and create text annotations.
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], fmt),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black")
+    fig.tight_layout()
+    return ax
+
+base_model = tf.keras.applications.MobileNet(input_shape=(img_height,img_width, 3), include_top=False,
+                          weights='imagenet')
+model = Sequential()
+model.add(base_model)
+model.add(GlobalAveragePooling2D())
+model.add(Dense(64, activation='relu'))
+model.add(BatchNormalization())
+model.add(Dropout(0.2))
+model.add(Dense(5, activation='sigmoid'))
+model.summary()
+
+
+model.compile(optimizer='Adam',loss="categorical_crossentropy",metrics=["accuracy",precision,recall])
+hist=model.fit_generator(train_generator,epochs=20,validation_data=val_generator,verbose=1)
+
+fig, ax = plt.subplots(2,1)
+ax[0].plot(hist.history['accuracy'], color='b', label="Training accuracy")
+ax[0].plot(hist.history['val_accuracy'], color='r',label="Validation accuracy")
+legend = ax[0].legend(loc='best', shadow=True)
+
+ax[1].plot(hist.history['loss'], color='b', label="Training loss")
+ax[1].plot(hist.history['val_loss'], color='r', label="validation loss",axes =ax[1])
+legend = ax[1].legend(loc='best', shadow=True)
+
+
+fig, ax = plt.subplots(2,1)
+ax[0].plot(hist.history['recall'], color='b', label="Training Recall")
+ax[0].plot(hist.history['val_recall'], color='r',label="Validation Recall")
+legend = ax[0].legend(loc='best', shadow=True)
+
+ax[1].plot(hist.history['loss'], color='b', label="Training loss")
+ax[1].plot(hist.history['val_loss'], color='r', label="validation loss",axes =ax[1])
+legend = ax[1].legend(loc='best', shadow=True)
+
+
+model.evaluate(val_generator)
+model.save('model/Mobilenet.h5')
+
+filenames = val_generator.filenames
+nb_samples = len(filenames)
+model_predict = model.predict_generator(val_generator,steps = nb_samples, verbose=2)
+
+y_true = val_generator.classes
+y_pred = model_predict.argmax(axis=1)
+plot_confusion_matrix(y_true, y_pred, classes=['Mild', 'Moderate', 'No_DR', 'Proliferate_DR', 'Severe'],
+                      title='Confusion matrix')
+
+from skimage import io
+from tensorflow.keras.preprocessing import image
+
+img = image.load_img(r'Data\train\Moderate\0afdfe5f422c.png', grayscale=False, target_size=(img_height,img_width))
+show_img=image.load_img(r'Data\train\Moderate\0afdfe5f422c.png', grayscale=False, target_size=(img_height,img_width))
+Retanial = Retanial
+x = image.img_to_array(img)
+x = np.expand_dims(x, axis = 0)
+
+x /= 255
+
+custom = model.predict(x)
+print(custom[0])
+
+
+plt.imshow(show_img)
+plt.show()
+
+a=custom[0]
+ind=np.argmax(a)
+        
+print('Prediction:',Retanial[ind])
